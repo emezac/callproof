@@ -14,7 +14,11 @@ from call_analyzer.main import create_app
 from call_analyzer.settings import Settings
 
 
-CONTRACTS = Path(__file__).parents[3] / "contracts"
+CONTRACTS = next(
+    parent / "contracts"
+    for parent in Path(__file__).parents
+    if (parent / "contracts").is_dir()
+)
 
 
 def validate_contract(name: str, document: dict) -> None:

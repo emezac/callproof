@@ -17,8 +17,11 @@ class AgentkitBootTest < ActiveSupport::TestCase
   end
 
   test "shared integration contracts contain valid JSON" do
-    contracts = Rails.root.join("..", "..", "contracts", "*.json")
-    paths = Dir[contracts].sort
+    contracts_dir = [
+      Rails.root.join("..", "contracts"),
+      Rails.root.join("..", "..", "contracts")
+    ].find(&:directory?)
+    paths = Dir[contracts_dir.join("*.json")].sort
 
     assert_equal 3, paths.length
     paths.each { |path| assert_kind_of Hash, JSON.parse(File.read(path)) }
