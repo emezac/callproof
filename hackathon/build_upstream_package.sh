@@ -6,7 +6,7 @@ package_root="$project_root/hackathon/upstream/apps/web/callproof"
 
 mkdir -p "$package_root/rails" "$package_root/call_analyzer" "$package_root/contracts"
 
-rsync -a --delete \
+rsync -a --delete --delete-excluded \
   --exclude '.bundle/' \
   --exclude '.env' \
   --exclude 'config/master.key' \
@@ -17,7 +17,7 @@ rsync -a --delete \
   --exclude 'vendor/bundle/' \
   "$project_root/apps/web/" "$package_root/rails/"
 
-rsync -a --delete \
+rsync -a --delete --delete-excluded \
   --exclude '.env' \
   --exclude '.pytest_cache/' \
   --exclude '.venv/' \
@@ -29,4 +29,3 @@ rsync -a --delete "$project_root/contracts/" "$package_root/contracts/"
 
 printf 'Generated from the CallProof monorepo. Do not edit copied runtime files here.\n' \
   > "$package_root/.generated-from-monorepo"
-
