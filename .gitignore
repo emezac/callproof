@@ -1,0 +1,26 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Ruby
+.bundle/
+vendor/bundle/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Runtime data
+**/log/
+**/tmp/
+**/storage/
+**/coverage/
+
+# Credentials and local databases
+**/config/master.key
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
