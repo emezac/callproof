@@ -61,7 +61,7 @@ pip install -e '.[dev]'
 CALLPROOF_WEBHOOK_SECRET=replace-me uvicorn call_analyzer.main:app --reload --port 8001
 ```
 
-Set `CALLPROOF_ANALYZER_ADAPTER=http` in Rails only when the analyzer and an HTTPS callback URL are available. `docker compose up --build` starts the analyzer API, Redis, and its RQ worker; Rails can continue running on the host during development.
+`docker compose up --build` starts the complete safe stack: Rails at `http://localhost:3000`, PostgreSQL with pgvector, the analyzer API at `http://localhost:8001`, Redis, and the RQ worker. The phone provider and LLM adapter remain fake, and external webhook delivery remains disabled. A production deployment must provide a public HTTPS callback URL and explicit live-call switches.
 
 See [docs/calle-integration.md](docs/calle-integration.md) before enabling any
 CALL-E environment variables.

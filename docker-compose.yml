@@ -1,4 +1,18 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: callproof
+      POSTGRES_PASSWORD: ${CALLPROOF_DATABASE_PASSWORD:-callproof-development}
+      POSTGRES_DB: callproof_production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callproof -d callproof_production"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - callproof_postgres:/var/lib/postgresql/data
+
   redis:
     image: redis:7.4-alpine
     command: redis-server --appendonly yes
@@ -26,6 +40,11 @@ services:
       - "8001:8001"
     volumes:
       - callproof_analyzer:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   call_analyzer_worker:
     build: ./services/call_analyzer
@@ -37,7 +56,36 @@ services:
     volumes:
       - callproof_analyzer:/data
 
+  rails:
+    build: ./apps/web
+    environment:
+      PGHOST: postgres
+      PGUSER: callproof
+      CALLPROOF_DATABASE_PASSWORD: ${CALLPROOF_DATABASE_PASSWORD:-callproof-development}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-callproof-development-only-secret-key-base-change-before-deploy}
+      RAILS_LOG_TO_STDOUT: "true"
+      RAILS_SERVE_STATIC_FILES: "true"
+      AGENTKIT_LLM_ADAPTER: fake
+      CALLPROOF_CALL_PROVIDER: fake
+      CALLPROOF_LIVE_CALLS: "false"
+      CALLPROOF_ANALYZER_ADAPTER: http
+      CALLPROOF_ANALYZER_URL: http://call_analyzer:8001
+      CALLPROOF_ANALYZER_CALLBACK_URL: https://rails.example.test/webhooks/call_analyzer
+      CALLPROOF_ANALYZER_WEBHOOK_SECRET: ${CALLPROOF_ANALYZER_WEBHOOK_SECRET:-development-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      call_analyzer:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:80/up"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
 volumes:
   callproof_analyzer:
+  callproof_postgres:
   callproof_redis:
-
