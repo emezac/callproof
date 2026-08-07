@@ -7,6 +7,28 @@ module CallProviders
   class Calle
     class Error < StandardError; end
     class SafetyError < Error; end
+    # Raised when a create attempt fails in a way that leaves the outcome unknown
+    # (timeout, connection reset, or a 5xx from CALL-E). The call may or may not
+    # have been placed, so callers must NOT issue a replacement create. Because the
+    # stable Idempotency-Key is reused, a deliberate retry is deduplicated provider
+    # side rather than dialing twice.
+    class AmbiguousError < Error; end
+
+    AMBIGUOUS_NETWORK_ERRORS = [
+      Timeout::Error, Errno::ECONNRESET, Errno::ECONNREFUSED, Errno::EHOSTUNREACH,
+      Errno::ETIMEDOUT, EOFError, SocketError, IOError
+    ].freeze
+
+    # 4xx codes that do NOT prove the call was rejected, so they must never be reported
+    # as "no call was placed":
+    #   409 — idempotency conflict. The SAME Idempotency-Key is already in flight or
+    #         already created a call, i.e. the original call most likely EXISTS.
+    #   408 — the server timed out reading the request; it may still have processed it.
+    AMBIGUOUS_HTTP_CODES = %w[408 409].freeze
+
+    # Canonical CALL-E API host the Bearer credential may be sent to. A custom
+    # base URL must be explicitly allow-listed via CALLE_ALLOWED_HOSTS.
+    DEFAULT_ALLOWED_HOSTS = %w[api.heycall-e.com].freeze
 
     def initialize(
       api_key: ENV["CALLE_API_KEY"],
@@ -24,7 +46,15 @@ module CallProviders
       validate_safety!(call_request)
       return call_request.phone_call if call_request.phone_call
 
-      response = create_call(payload(call_request, contract), idempotency_key: call_request.idempotency_key)
+      begin
+        response = create_call(payload(call_request, contract), idempotency_key: call_request.idempotency_key)
+      rescue AmbiguousError
+        # Outcome unknown — the call may have been accepted. Do NOT collapse to "failed".
+        # Mark the request unresolved so it is reconciled (re-attempt reuses the stable
+        # Idempotency-Key, so CALL-E deduplicates rather than dialing twice).
+        call_request.update!(status: "unresolved")
+        raise
+      end
       provider_call_id = response["call_id"] || response.fetch("id")
       call_request.create_phone_call!(
         provider: "calle",
@@ -40,13 +70,24 @@ module CallProviders
     end
 
     def retrieve(provider_call_id)
+      ensure_trusted_endpoint!
       uri = URI.join(@base_url.end_with?("/") ? @base_url : "#{@base_url}/", "v1/calls/#{provider_call_id}")
       request = Net::HTTP::Get.new(uri)
       request["Authorization"] = "Bearer #{@api_key}"
-      response = @transport.call(uri, request)
-      raise Error, "CALL-E HTTP #{response.code}: #{response.body}" unless response.code == "200"
 
-      JSON.parse(response.body)
+      begin
+        response = @transport.call(uri, request)
+      rescue *AMBIGUOUS_NETWORK_ERRORS => error
+        raise AmbiguousError, "CALL-E status fetch failed transiently (#{error.class}: #{error.message})"
+      end
+
+      code = response.code.to_s
+      return JSON.parse(response.body) if code == "200"
+      if code.start_with?("5") || AMBIGUOUS_HTTP_CODES.include?(code)
+        raise AmbiguousError, "CALL-E status fetch returned #{code}"
+      end
+
+      raise Error, "CALL-E HTTP #{code}: #{response.body}"
     end
 
     private
@@ -57,6 +98,27 @@ module CallProviders
       raise SafetyError, "live call has not been explicitly confirmed" if call_request.confirmed_at.blank?
       raise SafetyError, "CALLE_API_KEY is missing" if @api_key.blank?
       raise SafetyError, "CALL-E webhook URL must use HTTPS" unless URI(@webhook_url).scheme == "https"
+      ensure_trusted_endpoint!
+    end
+
+    # The Bearer credential must only ever leave the process over TLS to an
+    # allow-listed host. This blocks an arbitrary or plain-HTTP base URL from
+    # capturing the server CALL-E key.
+    def ensure_trusted_endpoint!
+      uri = URI(@base_url)
+      raise SafetyError, "CALLE_BASE_URL must use HTTPS" unless uri.scheme == "https"
+      raise SafetyError, "CALLE_BASE_URL is missing a host" if uri.host.blank?
+
+      unless allowed_hosts.include?(uri.host.downcase)
+        raise SafetyError, "CALLE_BASE_URL host '#{uri.host}' is not in the allowed host list"
+      end
+    end
+
+    def allowed_hosts
+      configured = ENV["CALLE_ALLOWED_HOSTS"].to_s.split(",").map { |host| host.strip.downcase }.reject(&:empty?)
+      return configured if configured.any?
+
+      DEFAULT_ALLOWED_HOSTS
     end
 
     def payload(call_request, contract)
@@ -123,10 +185,28 @@ module CallProviders
       request["Content-Type"] = "application/json"
       request["Idempotency-Key"] = idempotency_key
       request.body = JSON.generate(document)
-      response = @transport.call(uri, request)
-      raise Error, "CALL-E HTTP #{response.code}: #{response.body}" unless %w[200 201 202].include?(response.code)
 
-      JSON.parse(response.body)
+      begin
+        response = @transport.call(uri, request)
+      rescue *AMBIGUOUS_NETWORK_ERRORS => error
+        raise AmbiguousError,
+              "CALL-E create outcome unknown (#{error.class}: #{error.message}); no replacement will be placed. " \
+              "Reconcile with Idempotency-Key #{idempotency_key} before retrying."
+      end
+
+      code = response.code.to_s
+      return JSON.parse(response.body) if %w[200 201 202].include?(code)
+
+      # 5xx, plus the 4xx codes that do not prove rejection (409 idempotency conflict,
+      # 408), are ambiguous: the call may already exist.
+      if code.start_with?("5") || AMBIGUOUS_HTTP_CODES.include?(code)
+        raise AmbiguousError,
+              "CALL-E create returned #{code}; outcome unknown, no replacement will be placed. " \
+              "Reconcile with Idempotency-Key #{idempotency_key} before retrying."
+      end
+
+      # Any other 4xx is a definitive rejection: the call was not placed.
+      raise Error, "CALL-E HTTP #{code}: #{response.body}"
     end
 
     def perform_request(uri, request)

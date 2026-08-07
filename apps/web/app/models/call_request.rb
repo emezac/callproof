@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CallRequest < ApplicationRecord
-  STATUSES = %w[awaiting_confirmation pending running waiting_analysis waiting_human verified approved rejected failed canceled].freeze
+  STATUSES = %w[awaiting_confirmation pending running waiting_analysis waiting_human verified approved rejected failed canceled unresolved].freeze
   SCENARIOS = %w[compliant policy_violation].freeze
 
   belongs_to :provider_profile
@@ -18,6 +18,22 @@ class CallRequest < ApplicationRecord
   validate :live_calls_are_disabled
 
   before_validation :set_idempotency_key, on: :create
+  before_validation :set_confirmation_token, on: :create
+
+  # Unpredictable phrase the operator must type to confirm a real call. It is
+  # derived from a random token (not the sequential id), so it cannot be guessed
+  # from the request URL.
+  def confirmation_phrase
+    "PLACE CALL #{confirmation_token}"
+  end
+
+  # Does viewing this request require operator credentials? Checked on SEVERAL signals
+  # as defense in depth, not on operator_initiated alone: a row written before that
+  # column existed (or by any other path that reaches live execution) must still be
+  # protected rather than fall through as a public demo request.
+  def requires_operator_auth?
+    operator_initiated? || live_mode? || confirmed_at.present?
+  end
 
   def masked_phone_number
     return "" if recipient_phone_e164.blank?
@@ -25,10 +41,24 @@ class CallRequest < ApplicationRecord
     "#{recipient_phone_e164.first(3)}••••#{recipient_phone_e164.last(2)}"
   end
 
+  # Honest mode label for the run view: reflect whether a real call was placed rather
+  # than always claiming "Fake / no call".
+  def mode_label
+    provider = phone_call&.provider
+    return "Live · #{provider.upcase}" if provider.present? && provider != "fake"
+    return "Live workflow (no call yet)" if operator_initiated?
+
+    "Fake / no call"
+  end
+
   private
 
   def set_idempotency_key
     self.idempotency_key ||= SecureRandom.uuid
+  end
+
+  def set_confirmation_token
+    self.confirmation_token ||= SecureRandom.urlsafe_base64(24)
   end
 
   def live_calls_are_disabled
