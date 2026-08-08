@@ -32,6 +32,13 @@ It also includes the first real Rails ↔ Call Analyzer boundary:
 - HMAC-signed completion webhooks with timestamp and replay protection;
 - a second resumable AgentKit flow that routes remote policy exceptions to HITL.
 
+The analyzer contract is now version 2.0 and fail-closed. Each success condition is
+a typed claim with an expected provider value and a closed protocol identifier from
+which Rails and the analyzer derive the same exact confirmation statement.
+The offline evaluator only verifies that finite protocol; free-form language and
+semantic-only rules are explicitly `unevaluated` and go to human review. Provider
+results are claims to corroborate, never transcript evidence by themselves.
+
 The official CALL-E HTTP adapter is implemented behind explicit live-call safety
 gates. The demo UI cannot enable it. Terminal result polling is normalized into
 the same transcript contract and then sent through Call Analyzer and AgentKit.

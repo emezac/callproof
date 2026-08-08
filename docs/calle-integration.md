@@ -32,6 +32,13 @@ real call. The demo and the automated test suite never place a call and never
 require credentials. Live calls only happen through the deliberate, operator
 authenticated two-step confirmation flow.
 
+CALL-E is also instructed to emit canonical verification statements derived from the
+immutable contract's closed protocol identifiers. The deterministic analyzer accepts only an exact statement,
+an immediately adjacent exact recipient response, and an exact match between the
+provider result and the contract's expected value. If the voice agent paraphrases,
+the transcript contains conflicting money values, or a rule needs open-ended semantic
+interpretation, the call remains unverified and is routed to human review.
+
 ## Verified live test (2026-08-05)
 
 A single controlled live call was placed through the official CALL-E MCP surface
@@ -70,4 +77,3 @@ returns the REST envelope in both cases, so a single validation and persistence
 path (`CallProviders::PersistCalleResult`) serves either surface. Recipient
 status, phone match, task completion and confidence are validated before a call
 is marked complete regardless of which surface produced the result.
-

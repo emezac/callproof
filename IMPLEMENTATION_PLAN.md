@@ -169,6 +169,7 @@ Exit criterion: a fictional call progresses from intent to verified verdict with
 - [x] Add direct transcript ingestion so STT is optional.
 - [x] Add policy and goal evaluation fields.
 - [x] Add evidence-turn references and confidence.
+- [x] Replace lexical corroboration with typed v2 claims and an exact, fail-closed protocol.
 - [x] Add signed completion webhooks and status recovery.
 - [ ] Preserve audio ingestion as a fallback path.
 - [x] Replace in-process background tasks with Altur's RQ/Redis worker boundary, retaining inline tests.
